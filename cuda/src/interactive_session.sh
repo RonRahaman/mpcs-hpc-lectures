@@ -1,0 +1,1 @@
+srun -p titan --pty --gres=gpu:1 -t 00:30 /bin/bash

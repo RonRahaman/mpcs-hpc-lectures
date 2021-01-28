@@ -157,23 +157,69 @@
         \end{block}
     \end{frame}
 
-    \section{Exercises}
+    \section{Using GPU Resources at UChicago}
 
-    \subsection{Running on Midway}
-
-    \begin{frame}{Midway Environment}
+    \begin{frame}{Peanut}
         \begin{itemize}
-            \item The V100 GPUs are available on "midway".  Older models (K80) are available on "midway2".
-            \item Can use either one for today.  Quicker job turnaround on midway2
-            \item To compile \textbf{and run}, you need \texttt{module load cuda/8.0}
-            \item To run on a GPU node, you need some new SBATCH parameters:
+            \item UChicago CS department's Peanut cluster has a good range of GPU partitions:
+            \begin{itemize}
+                \item \texttt{titan}: 4x NVIDIA GTX 1080 Ti
+                \item \texttt{quadro}: 2x NVIDIA Quadro P4000
+                \item \texttt{pascal}: 1x Nvidia GTX1080
+            \end{itemize}
+            \item All are based on \href{https://en.wikipedia.org/wiki/Pascal_(microarchitecture)}{NVIDIA's Pascal microarchitecture}
+            \item For a full tutorial about Peanut, see \href{https://paper.dropbox.com/doc/MPCS-51087-Peanut-Guide--BEH4QScOO4aUHCdYBIXHJTuOAQ-H2Qv2MChSshxwVqF7cuFH}{here}
+        \end{itemize}
+    \end{frame}
+
+    \begin{frame}{Environment Setup for CUDA on Peanut}
+        \begin{itemize}
+            \item The CUDA SDK is already installed on the GPU nodes of Peanut.
+            \item To use it, you must add it to the \texttt{PATH} and \texttt{LD\_LIBRARY\_PATH} variables:
+            \item Put this code in your \texttt{.bashrc} file to set them automatically at login
             \begin{block}{}
-                \inputminted{bash}{src/midway-gpu.sbatch}
+                \inputminted{bash}{src/cuda_rc.sh}
             \end{block}
         \end{itemize}
     \end{frame}
 
-    \subsection{Example 1: Scalar Addition}
+    \begin{frame}{Interactive Jobs on Peanut}
+        \begin{itemize}
+            \item To begin an interactive job:
+            \begin{block}{}
+                \inputminted{text}{src/interactive_session.sh}
+            \end{block}
+            \item Time format is in HH:MM
+            \item Recommended: Do interactive development on \texttt{titan} partition.  This is a shared (not exclusive) partition, so you will get in quickly.
+            \item See table of more options \href{https://paper.dropbox.com/doc/MPCS-51087-Peanut-Guide--BEH4QScOO4aUHCdYBIXHJTuOAQ-H2Qv2MChSshxwVqF7cuFH}{here}
+        \end{itemize}
+    \end{frame}
+    
+    \begin{frame}{Batch Jobs on Peanut}
+        \begin{itemize}
+            \item To begin a batch job, create an arbitrarily-named shell script
+            \begin{block}{run\_awesome\_program.sh}
+                \inputminted{shell}{src/batch.sh}
+            \end{block}
+            \item Submit it using \texttt{sbatch run\_awesome\_program.sh}
+            \item Check on its progress using \texttt{squeue}
+            \item See table of more options \href{https://paper.dropbox.com/doc/MPCS-51087-Peanut-Guide--BEH4QScOO4aUHCdYBIXHJTuOAQ-H2Qv2MChSshxwVqF7cuFH}{here}
+        \end{itemize}
+    \end{frame}
+
+    %\begin{frame}{Midway Environment}
+    %    \begin{itemize}
+    %        \item The V100 GPUs are available on "midway".  Older models (K80) are available on "midway2".
+    %        \item Can use either one for today.  Quicker job turnaround on midway2
+    %        \item To compile \textbf{and run}, you need \texttt{module load cuda/8.0}
+    %        \item To run on a GPU node, you need some new SBATCH parameters:
+    %        \begin{block}{}
+    %            \inputminted{bash}{src/midway-gpu.sbatch}
+    %        \end{block}
+    %    \end{itemize}
+    %\end{frame}
+
+    \section{Example 1: Scalar Addition}
 
     \begin{frame}{Example 1:  Scalar Addition}
         \begin{itemize}
@@ -262,15 +308,17 @@
         \begin{block}{}
 \texttt{nvcc -O2 01\_scalar\_add.cu -o 01\_scalar\_add}
         \end{block}
-        \texttt{nvcc} is the NVIDIA compiler that:
         \begin{itemize}
-            \item Uses a normal CPU compiler backend to compile host code
-            \item Uses another backend to compile device code to PTX (assembly for NVIDIA GPUs)
+            \item \texttt{nvcc} is the NVIDIA compiler that:
+            \begin{itemize}
+                \item Uses a normal CPU compiler backend to compile host code
+                \item Uses another backend to compile device code to PTX (assembly for NVIDIA GPUs)
+            \end{itemize}
+            \item CMake has excellent support for CUDA, but we will cover that later.
         \end{itemize}
-        Lots of options to optimize at compile-time ...
     \end{frame}
 
-    \subsection{Block and Thread Indexing}
+    \section{Implicit Loops with Block and Thread Indexing}
 
     \begin{frame}{Hiearchical Block and Thread Indexing}
             \begin{columns}
@@ -337,23 +385,29 @@
     \begin{frame}{Limits on Numbers of Threads and Blocks}
         \begin{itemize}
             \item Each GPU generation has limits on the number of threads/block, as well as the sizes of grids and blocks
-            \item The limits on a V100 are:
+            \item  Limits on NVIDIA GTX 1080 Ti (Peanut's \texttt{titan} partition):
             \begin{itemize}
                 \item Max threads/block: 1024
                 \item Max block dimensions:  (1024, 1024, 64)
                 \item Max grid dimensions: (2147483647, 65535, 65535)
             \end{itemize}
-            \item Examples:
+            \item Example: allowed block dims:
             \begin{itemize}
-                \item Some allowed block dims:  (1024, 1, 1); (1, 1024, 1); (2, 8, 64)
-                \item Disallowed block dims:  (1024, 2, 1) exceeds max threads/block; (4, 2, 128) exceeds block dims
+                \item (1024, 1, 1)
+                \item (1, 1024, 1)
+                \item (2, 8, 64)
+            \end{itemize}
+            \item Example: disallowed block dims:
+            \begin{itemize}
+                \item (1024, 2, 1) exceeds max threads/block
+                \item (4, 2, 128) exceeds block dims
             \end{itemize}
         \end{itemize}
     \end{frame}
 
-    \subsection{Example 2:  A Small Vector Sum}
+    \section{Example 2:  A Small Vector Sum}
 
-    \begin{frame}{Example 2:  The Kernel}
+    \begin{frame}{Example 2:  Kernel for Small Vector Sum}
         \begin{block}{}
             \inputminted[firstline=6,lastline=11]{cuda}{src/02_vector_add.cu}
         \end{block}
@@ -377,18 +431,24 @@
         \end{block}
     \end{frame}
 
-    \subsection{Example 3: A General Vector Sum}
+    \section{Example 3: A General Vector Sum}
 
-    \begin{frame}{Example 3:  The Kernel}
+    \begin{frame}{Example 3: Kernel for General Vector Sum}
         \begin{block}{}
             \inputminted[firstline=6,lastline=12]{cuda}{src/03_large_vector_add.cu}
         \end{block}
         \begin{itemize}
-            \item With this for-loop, the threads stride over the array
-            \item \textbf{This loop is not done in parallel (not even in SIMD!)}.
-            \item The loop is done sequentially by a single thread (remember:  SPMD).
+            \item With this for-loop, the threads stride over the array.
+            \item This works for an arbitrary array size, grid dim, and block dim (provided they are with the hardware limits)
+            \item Note that (remember SPMD):
+            \begin{itemize}
+                \item The function is executed by each thread.  The threads work together in parallel.
+                \item The loop in the function is executed \textbf{sequentially} by each thread.
+            \end{itemize}
         \end{itemize}
     \end{frame}
+    
+    \section{Example 4: Mandebrot Set}
 
     \begin{frame}{Example 4:  Mandelbrot Set}
         \begin{itemize}
