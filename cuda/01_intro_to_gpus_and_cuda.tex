@@ -130,13 +130,17 @@
         \begin{columns}
             \column{0.4\textwidth}
             \begin{itemize}
-                \item Programming abstractions in CUDA:
+                \item Abstractions in CUDA:
                 \begin{itemize}
-                    \item \textbf{Thread (yellow)}: Runs a single operation on one SP (greem)
+                    \item \textbf{Thread (yellow)}: Runs a single operation on one SP (green)
                     \item \textbf{Warp (yellow)}: A group of threads that can be executed in SIMD (red)
                     \item \textbf{Block (blue)}: A group of threads and warps that runs on one SM (grey)
                 \end{itemize}
-                \item These allow multiple levels of parallelism
+                \item These allow nested parallelism
+                \begin{itemize}
+                    \item Groups of blocks execute in MIMD
+                    \item Groups of threads execute in SIMD
+                \end{itemize}
             \end{itemize}
             \column{0.6\textwidth}
             \begin{figure}
@@ -277,7 +281,7 @@
             \item This statement calls (launches) a device function (kernel) from the host code
             \item The extra \texttt{<<<dim\_grid, dim\_block>>>} syntax are runtime parameters that specify:
             \begin{itemize}
-                %\item The ``grid'' dimensions:  The number of blocks to create
+                \item The grid dimensions:  The number of blocks
                 \item The block dimensions:  The number of threads per block
             \end{itemize}
             \item Here, we run with 1 block containing 1 thread (not actually doing parallel work)

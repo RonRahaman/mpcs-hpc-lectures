@@ -1,0 +1,1 @@
+  __shared__ float cache[block_dim];

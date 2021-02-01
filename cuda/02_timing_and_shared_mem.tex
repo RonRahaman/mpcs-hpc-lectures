@@ -1,0 +1,359 @@
+%\documentclass[aspectratio=169]{beamer}
+\documentclass{beamer}
+
+\usetheme{mpcshpc}
+
+\usepackage{lmodern}
+\usepackage{listings}
+\usepackage{hyperref}
+\usepackage[scale=2]{ccicons}
+\usepackage{minted}
+\usepackage{multirow}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{amsmath}
+\usepackage{biblatex}
+\usepackage{makecell}
+\graphicspath{{./img/}}
+
+\title{Async 4: Timing and Shared Memory}
+\subtitle{MPCS 51087: High-Performance Computing}
+\date{Spring 2020}
+\author{Ron Rahaman}
+\institute{The University of Chicago, Dept of Computer Science}
+
+\setwatermark{\includegraphics[height=7cm]{img/snail-rocket}}
+\setminted{fontsize=\footnotesize}
+
+\AtBeginSection[]
+{
+\begin{frame}
+    \frametitle{Table of Contents}
+    \tableofcontents[currentsection]
+\end{frame}
+}
+
+
+\AtBeginSubsection[]
+{
+\begin{frame}
+    \frametitle{Table of Contents}
+    \tableofcontents[currentsubsection]
+\end{frame}
+}
+
+
+\begin{document}
+
+    \maketitle
+
+    \begin{frame}
+        \frametitle{Table of Contents}
+        \tableofcontents[]
+    \end{frame}
+
+    \section{Timing GPU Code}
+
+    \begin{frame}{CPU Timers?}
+
+        \begin{itemize}
+            \item Timing GPUs form host code is unreliable because \textbf{many CUDA commands are asynchronous}
+            \begin{itemize}
+                \item Asynchronous: When called from CPU, begins to execute on GPU, and \textbf{CPU can continue execution before the GPU execution is finished}.
+                \item All kernel launches are asynchronous
+                \item Normal memcopies are blocking
+            \end{itemize}
+            \item Example:  Is the time measured between \texttt{start} and \texttt{kernel\_end} reliable?  What about \texttt{start} and \texttt{memcpy\_end}?
+        \end{itemize}
+
+        \begin{block}{}
+            \inputminted{cuda}{src/cpu-timer.cu}
+        \end{block}
+
+    \end{frame}
+
+    \begin{frame}{GPU Timing with CUDA Events}
+        \begin{itemize}
+            \item During execution on the GPU, CUDA \textbf{events} can be used to reliably time CUDA \textbf{streams}
+            \item Events and streams have many complex usages, but basic usage for timing is very simple.
+        \end{itemize}
+    \end{frame}
+
+    \begin{frame}{Basics of Streams and Events}
+        \begin{columns}
+            \begin{column}{0.6\textwidth}
+                \begin{itemize}
+                    \item A CUDA \textbf{stream} is an ordered queue of commands that execute on the GPU
+                    \begin{itemize}
+                        \item Always one stream (``default stream'', ``stream 0'', or ``NULL stream'')
+                        \item Programmer can create additional streams for asynchronous commands
+                        \item Commands on the default stream implicitly block other streams
+                    \end{itemize}
+                    \item A CUDA \textbf{event} is a timestamp recorded by the GPU
+                    \begin{itemize}
+                        \item An event is queued up on a particular stream
+                    \end{itemize}
+                    \item By placing events on the default stream, we can reliably time the GPU.
+                \end{itemize}
+            \end{column}
+            \begin{column}{0.4\textwidth}
+                \begin{figure}
+                    \centering
+                    \includegraphics[width=\textwidth]{img/04/cu-by-ex-10-3.png}
+                \end{figure}
+            \end{column}
+        \end{columns}
+    \end{frame}
+
+    \begin{frame}{Using Event-based Timers}
+        \begin{columns}
+            \begin{column}{0.4\textwidth}
+            {\footnotesize
+            \begin{itemize}
+                \item \texttt{cudaEventCreate} initializes add \texttt{cudaEvent\_t} object
+                \item \texttt{cudaEventRecord(tick, 0)}:  Queues-up the first event on stream 0
+                \item \texttt{kernel}: Queues-up the kernel execution on stream 0
+                \item \texttt{cudaEventRecord(tock, 0)}: Queues-up second event on stream 0
+            \end{itemize}
+            }
+            \end{column}
+            \begin{column}{0.6\textwidth}
+                \begin{block}{}
+                    \inputminted{cuda}{src/gpu-timer.cu}
+                \end{block}
+            \end{column}
+        \end{columns}
+    \end{frame}
+
+    \begin{frame}{Using Event-based Timers, cont.}
+        \begin{columns}
+            \begin{column}{0.4\textwidth}
+            {\footnotesize
+            \begin{itemize}
+                \item \texttt{cudaEventElapsedTime} returns the elapsed wall time between two events (in milliseconds)
+                \item But first, we need to call \texttt{cudaEventSynchronize}!
+                \item \texttt{cudaEventRecord} is an asynchronous command
+                \item We need to make sure we call \texttt{cudaEventElapsedTime} after the event \texttt{tock} has actually finished.
+            \end{itemize}
+            }
+            \end{column}
+            \begin{column}{0.6\textwidth}
+                \begin{block}{}
+                    \inputminted{cuda}{src/gpu-timer.cu}
+                \end{block}
+            \end{column}
+        \end{columns}
+    \end{frame}
+
+    \section{Intro to Shared Memory}
+
+    \begin{frame}{Review: Abstraction/Hardware Mapping}
+        \begin{columns}
+            \column{0.5\textwidth}
+            {\footnotesize
+            \begin{itemize}
+                \item \textbf{Thread (yellow)}: Runs a single operation on one SP
+                \item \textbf{Warp (red)}:
+                \begin{itemize}
+                    \item A warp contains a specific number of threads, which is fixed by the hardware
+                    \item A warp is assigned to an SM
+                    \item A warp's threads execute on a group of SPs
+                    \item The threads in a warp can execute in SIMD
+                \end{itemize}
+                \item \textbf{Block (blue)}:
+                \begin{itemize}
+                    \item A block contains a specific number of threads (and hence warps)
+                    \item A block is assigned to an SM
+                    \item Multiple blocks can execute in parallel on one SM
+                \end{itemize}
+            \end{itemize}
+            }
+            \column{0.5\textwidth}
+            \begin{figure}
+                \centering
+                \includegraphics[width=\textwidth]{img/03/gpu-hard-abs.png}
+            \end{figure}
+        \end{columns}
+    \end{frame}
+
+    \begin{frame}{What is Shared Memory}
+        \begin{itemize}
+            \item A variable located in \textbf{shared memory} is ``block private.''
+            \begin{itemize}
+                \item Each block has a different copy
+                \item All threads in the block have access to that copy
+                \item Hence, shared memory access should be synchronized within each block (but not
+            \end{itemize}
+            \item Within each block, threads may need to be synchronized to avoid race conditions on shared memory writes
+            \item Shared memory physically resides on higher-bandwidth memory and can be managed by the user
+        \end{itemize}
+    \end{frame}
+    
+    \section{Example: Dot Product}
+    
+    \subsection{Algorithm}
+
+    \begin{frame}{Extended Example: Dot Product}
+        A dot product is one example of a reduction
+        \begin{equation*}
+            \vec{a} \cdot \vec{b} = \sum_i = a_i b_i
+        \end{equation*}
+        We will explore how to use shared-memory buffers to optimize this reduction
+    \end{frame}
+
+    \begin{frame}{Dot Product Algorithm: Step 1}
+        \begin{itemize}
+            \item Here, the dot product is executed by 3 blocks (blue, green, orange) with 4 threads/block
+            \item We have allocated a shared memory buffer for each block
+            \item Each thread $i$ stores the result $a_i b_i$ in shared memory
+        \end{itemize}
+        \begin{figure}
+            \centering
+            \includegraphics[width=0.8\textwidth]{img/04/dot-01.png}
+        \end{figure}
+    \end{frame}
+
+    \begin{frame}{Dot Product Algorithm: Step 2}
+        \begin{itemize}
+            \item Each block performs a reduction (sum) on its shared memory buffer
+            \item Each block puts its partial sum in global memory
+        \end{itemize}
+        \begin{figure}
+            \centering
+            \includegraphics[width=0.8\textwidth]{img/04/dot-02.png}
+        \end{figure}
+    \end{frame}
+
+    \begin{frame}{Dot Product Algorithm: Step 3}
+        \begin{itemize}
+            \item The partial sums are sent to the host
+            \item The host does the final reduction
+        \end{itemize}
+        \begin{figure}
+            \centering
+            \includegraphics[width=0.8\textwidth]{img/04/dot-03.png}
+        \end{figure}
+    \end{frame}
+    
+    \subsection{Implementation}
+
+    \begin{frame}{Part 1. Allocating Memory}
+            \begin{itemize}
+            {\footnotesize
+                \item \texttt{block\_dim} (the number of threads/block) is a compile-time constant
+                \item \texttt{n} is the size of the operands \texttt{a} and \texttt{b}
+                \item \texttt{grid\_dim} (the number of blocks) is \texttt{ceil(n / block\_dim)}
+                \item \texttt{partial\_c} and \texttt{d\_partial\_c} will contain the partial sums from every block.
+            }
+            \end{itemize}
+            \begin{block}{}
+                \inputminted[fontsize=\footnotesize]{cuda}{src/dot_snippet_01.cu}
+            \end{block}
+    \end{frame}
+
+    \begin{frame}{Part 2. Each thread computes and its partial result}
+        \begin{itemize}
+        {\footnotesize
+        \item Each block gets a shared memory \texttt{cache} of size \texttt{block\_dim}
+        \item Each thread independently accumulates \texttt{cache[threadIdx.x] += a[i] * b[i]} for a subset of \texttt{i}
+        \item After this, we want all threads to see the result in \texttt{cache}.  Hence, we sync all the threads in the block with \texttt{\_\_syncthreads()}
+        }
+        \end{itemize}
+        \begin{block}{}
+            \inputminted[fontsize=\footnotesize]{cuda}{src/dot_snippet_02.cu}
+        \end{block}
+    \end{frame}
+
+    \begin{frame}{Part 3.  Parallel reduction in each block}
+        \begin{enumerate}
+        {\footnotesize
+            \item Start with \texttt{block\_dim} values in cache.
+            \item \texttt{block\_dim / 2} threads participate in this step.
+            \item Each thread will accumulate two values in parallel.
+            \item When all threads are done, there are \texttt{block\_dim / 2} results in cache
+            \item Continue bisecting until we have 1 result in each block.
+        }
+        \end{enumerate}
+        \begin{figure}
+            \centering
+            \includegraphics[width=0.5\textwidth]{img/04/parallel-reduc.png}
+        \end{figure}
+    \end{frame}
+
+    \begin{frame}{Part 3. Parallel reduction in each block}
+        \begin{itemize}
+        {\footnotesize
+        \item First, do parallel reduction. Note \texttt{\_\_syncthreads()} in each step.
+        \item Then each block stores its result in global memory.  This will be sent back to host.
+        }
+        \end{itemize}
+        \begin{block}{}
+            \inputminted[fontsize=\footnotesize]{cuda}{src/dot_snippet_03.cu}
+        \end{block}
+    \end{frame}
+
+    \begin{frame}{Part 4. Parallel reduction on host}
+        \begin{itemize}
+        {\footnotesize
+        \item Recall that \texttt{partial\_c} are the results from each block.
+        \item After copying \texttt{partial\_c} to the host, the host does one final reduction.
+        \item We could've done the final reduction on device using atomic operations.
+              However, for large block counts, atomic operations on device are very inefficient.
+              Hence, the host will actually be more efficient for this part.
+        }
+        \end{itemize}
+        \begin{block}{}
+            \inputminted[fontsize=\footnotesize]{cuda}{src/dot_snippet_04.cu}
+        \end{block}
+    \end{frame}
+
+
+    \begin{frame}{Static Shared Memory}
+        Review from dot product in Lecture 4B:
+        \begin{itemize}
+            \item In global scope:  Declare block dimension
+            \begin{block}{}
+                \inputminted{cuda}{src/static_01.cu}
+            \end{block}
+            \item In kernel def:  Declare static array for shared mem
+            \begin{block}{}
+                \inputminted{cuda}{src/static_02.cu}
+            \end{block}
+            \item At kernel call:  Determine grid dimension
+            \begin{block}{}
+                \inputminted{cuda}{src/static_03.cu}
+            \end{block}
+        \end{itemize}
+        See full source in repo, \texttt{src/lecture\_05/dot\_gpu.cu}
+    \end{frame}
+
+    \begin{frame}{Dynamic Shared Memory}
+        \begin{itemize}
+            \item In the kernel definition, a special declaration allows you to use arbitrarily-sized shared memory arrays (note empty brackets)
+            \begin{block}{}
+                \inputminted{cuda}{src/shared_01.cu}
+            \end{block}
+            \item In kernel launch, a third config parameter specifies the size of the shared memory per block
+            \begin{block}{}
+                \inputminted{cuda}{src/shared_02.cu}
+            \end{block}
+            \item See \url{https://devblogs.nvidia.com/using-shared-memory-cuda-cc/}
+        \end{itemize}
+    \end{frame}
+
+    \begin{frame}{Exercise 1:  Implementing Dynamic Shared Memory in Dot Product}
+        Start with source in repo, \texttt{src/lecture\_05/dot\_gpu.cu}, and add
+        the following features:
+        \begin{enumerate}
+            \item Add these command line args (don't have to use \texttt{get\_input})
+            \begin{itemize}
+                \item Size of \texttt{a} and \texttt{b}
+                \item Grid dimension
+                \item Block dimension
+            \end{itemize}
+            \item Use command-line args to set size of shared-memory cache
+        \end{enumerate}
+        Solution in \texttt{src/lecture\_05/solutions/01\_dot.cu}
+    \end{frame}
+
+\end{document}
