@@ -3,7 +3,7 @@ cudaEventCreate(&tick);
 cudaEventCreate(&tock);
 
 cudaEventRecord(tick, 0);
-kernel<<<grid,threads>>> (arg1, arg2);
+kernel<<<griddim,blockdim>>> (foo, bar);
 cudaEventRecord(tock, 0);
 
 cudaEventSynchronize(tock);

@@ -1,0 +1,247 @@
+\documentclass{article} 
+\usepackage[noend]{algpseudocode}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{algorithm}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage[margin=1.25in]{geometry}
+
+\title{MPCS 51087 -- Homework 4}
+%\author{Ron Rahaman}
+
+\begin{document}
+\maketitle
+
+\section{Introduction to Ray Tracing}
+
+Ray tracing is a powerful method for rendering three-dimensional objects with
+complex light interactions.  Many other physical phenomena are also analgous to
+ray tracing -- for example, simulating neutrons passing through matter.  Figure
+1 shows the basic idea for a reflective object.  An observer (the
+eyeball) is viewing an object through a window (the rectangle).  The object is
+illuminated by a light source, which is emitting rays of light (the arrows) in
+many directions.  The observer will see rays that reflect off of the object.
+
+\begin{figure}
+  \label{FigBasic}
+  \centering
+  \includegraphics[width=0.4\textwidth]{RTfigure3.jpg}
+  \caption{Illustration of Ray-Tracing.  Image credit: [\ref{ItemUNC}]}
+\end{figure}
+
+Our task is to render the image seen by the observer through the window. To do
+so, the simulation can do one or both of the following:
+\begin{itemize}
+  \item Simulate light rays starting at the light source and ending at the observer.
+  \item Simulate light rays starting from the observer and going backwards to the light source.
+\end{itemize}
+
+We will implement the latter scheme in this assignment.  We will simulate a
+reflective sphere in black-and-white, illuminated by a single light source.  A
+serial version can be implemented in about 100 lines of code.
+
+\section{Vector Notation}
+
+Solving the problem involves the use of 3D vectors.  A vector $\vec V$ has
+scalar components,$\vec V = \left(V_X, V_Y, V_Z\right)$. Adding or subtracting
+two vectors yields a vector, $\vec V - \vec U = (V_X - U_X, V_Y-U_Y, V_Z-U_Z)$.
+Multipying a scalar and a vector yields a scalar, $t  \vec V = \left(tV_X,
+tV_Y, tV_Z\right)$.  Dividing a vector by a scalr yields a scalar, $\vec V / t
+= (V_X/t, V_Y/t, V_Z/t)$. The dot product (a multiplication between two
+vectors) yields a scalar, $\vec V \cdot \vec U = V_X U_X + V_Y U_Y + V_Z U_Z$.
+The norm (or magnitude or length) of the vector is a scalar defined by $ | \vec
+V | = \sqrt{V_X^2 + V_Y^2 + V_Z^2}$.
+
+\newpage
+
+\section{Theory}
+
+This section describes the theory used in our implementation.  The
+implmentation itself is brief and is described in Algorithm 1 below, so
+you may skip this section as needed.
+
+Figure 2 shows a 2D cross-section of the problem with the
+information we need.  The observer is at the origin and faces the positive
+y-direction.  The sphere is located at $\vec C = (C_X, C_Y, C_Z)$ and has
+radius $R$. The window is parallel to the (x,z)-plane at $y=W_Y$ and has bounds
+$-W_{max} < W_X < W_{max}$ and $-W_{max} < W_Z < W_{max}$.  In the simulation,
+we will represent the window as an $n \times n$ grid, $G$. The light source
+is located at $\vec L = (L_X, L_Y, L_Z)$.
+
+Our task is to simulate many rays originating from the observer (so-called
+``view rays'') with randomly-selected directions.  The steps are as follows:
+
+\begin{figure}
+  \label{FigComplex}
+  \centering
+  \includegraphics[width=\textwidth]{ray_tracing_diagram.pdf}
+  \caption{2D Diagram for Ray-Tracing}
+\end{figure}
+
+\begin{itemize}
+
+  \item \textbf{Select the direction of view ray ($\vec V$).} Let $\vec V$ be a
+    unit vector representing the direction of the view ray.  In spherical
+    coordinates, We will randomly select its component angles $\left(\theta,
+    \phi\right)$ such that $0 < \theta < \pi$ and $0 < \phi < \pi$.  Then we
+    will get $\vec V$ in Cartesion coordinates:
+    \begin{align*}
+      V_X &= \sin \theta \cos \phi \\
+      V_Y &= \sin \theta \sin \phi \\
+      V_Z &= \cos \theta
+    \end{align*}
+
+  \item \textbf{Find the intersection of the view ray with the window ($\vec
+    W$).} Knowing that the window is at $W_Y$, the window's point-of-intersection with
+    the view ray is given by the vector $\vec W$:
+    $$ \vec W = \frac{W_Y}{V_Y} \vec V $$
+    If the view ray is outside the window ($\left|W_X\right| <  W_{max}$ or
+    $\left|W_Z\right| < W_{max}$), we reject it and chose a new $\vec V$.
+
+
+  \item \textbf{Find the intersection of view ray with sphere ($\vec I$).}  Let
+    $\vec I$ be the sphere's point-of-intersection with the view ray.  To find
+    $\vec I$, we solve the following system of equations:
+    \begin{align*}
+      \vec I &= t \vec V \\
+      \left| \vec I - \vec C \right|^2 &= R^2
+    \end{align*}
+    These are the equations of the view ray and the sphere, respectively.
+    Solving for $t$ yields:
+    $$ t = \left(\vec V \cdot \vec C \right) -
+    \sqrt{\left(\vec V \cdot \vec C \right)^2 + R^2 - \vec C \cdot \vec C} $$
+    which can be back-substituted to get $\vec I$.  If $t$ does not have a real
+    solution ($(\vec V \cdot \vec C )^2 + R^2 - \vec C \cdot \vec C < 0$), then
+    view ray does not intersect the sphere and we choose a new $\vec V$.
+
+  \item \textbf{Find the observed brightness of the sphere ($b$).}  Next, we want to
+    find the brightness of the sphere that is observed at $\vec I$.  To do so , we:
+
+    \begin{itemize}
+
+      \item \textit{Find the unit normal vector ($\vec N$).} The unit normal
+        vector $\vec N$ is perpindicular to the sphere's surface at $\vec I$.
+        $$ \vec N = \frac{\vec I - \vec C}{\left| \vec I - \vec C \right|} $$
+
+      \item \textit{Find the direction to the light source ($\vec S$).} The
+        direction to light source (somtimes called the ``shadow ray'') is
+        represented by the unit vector $\vec S$.
+        $$ \vec S = \frac{\vec L - \vec I}{\left| \vec L - \vec I \right|} $$
+
+      \item \textit{Find the brightness ($b$).} The brightness can be found
+        from $\vec S$ and $\vec N$ using ``Lambertian shading''.
+        $$
+        b = \left\{
+          \begin{array}{ll}
+            0 & \quad  \vec S \cdot \vec N < 0 \\
+            \vec S \cdot \vec N & \quad  \vec S \cdot \vec N \ge 0 \\
+          \end{array}
+          \right.
+        $$
+
+    \end{itemize}
+
+  \item \textbf{Add the brightness to the window's grid.}
+    We find $\left(i,j\right)$ such that $\vec G(i,j)$ is the position of $\vec
+    W$ on the window's grid $G$ and let:
+    $$ G(i,j) = G(i,j) + b $$
+
+\end{itemize}
+
+\newpage
+
+\section{Implementation}
+
+Algorithm 1 describes a ray-tracing implementation.  As described above, the
+observer is at the origin and is facing the positive-$y$ direction.  The sphere
+is located at $\vec C = (C_X, C_Y, C_Z)$ and has radius $R$. The light source
+is located at $\vec L = (L_X, L_Y, L_Z)$.  The window is parallel to the
+(x,z)-plane at $y=W_Y$, has bounds $-W_{max} < W_X < W_{max}$ and $-W_{max} <
+W_Z < W_{max}$, and is repsresented by an $n \times n$ grid, $G$.
+
+\begin{algorithm}
+  \caption{Ray Tracing Algorithm}
+  \label{Alg}
+  \begin{algorithmic}[1]
+    \State allocate $G[1\ldots n][1\ldots n]$
+      \Comment The window is respresented on the grid $G$
+    \State $G[i][j] = 0$ for all $(i,j)$
+    \For{$n = 1 \ldots N_{rays}$}
+    \Repeat
+      \State $\theta = $ a random decimal between $\left(0, \pi\right)$
+        \Comment The direction of the view ray in spherical coords
+      \State $\phi = $ a random decimal between $\left(0, \pi\right)$
+      \State $\vec V = \left( \sin \theta \cos \phi, \sin \theta \sin \phi, \cos \theta \right)$
+        \Comment The direction of the view ray in Cartesian coords
+      \State $ \vec W = \frac{W_Y}{V_Y} \vec V $
+        \Comment The intersection of the view ray and the window
+    \Until{$\left|W_X\right| >  W_{max} \textbf{ and } \left|W_Z\right| > W_{max} \textbf{ and } \left(\vec V \cdot \vec C \right)^2 + R^2 - \vec C \cdot \vec C < 0$}
+    \State $ t = \left(\vec V \cdot \vec C \right) - \sqrt{\left(\vec V \cdot \vec C \right)^2 + R^2 - \vec C \cdot \vec C} $
+    \State $\vec I = t \vec V$
+      \Comment The intersection of the view ray and the sphere
+    \State $ \vec N = \frac{\vec I - \vec C}{\left| \vec I - \vec C \right|} $
+      \Comment The unit normal vector at $\vec I$
+    \State $\vec S = \frac{\vec L - \vec I}{\left| \vec L - \vec I \right|} $
+      \Comment The direction of the light source at $\vec I$
+    \State $b = \textsc{max}\left( 0, \vec S \cdot \vec N \right)$
+      \Comment The brightness observed at $\vec I$
+    \State find $\left(i,j\right)$ such that $G(i,j)$ is the gripoint of $\vec W$ on $G$
+    \State $G\left(i,j\right) = G\left(i,j\right) + b$
+      \Comment Add brightness to grid
+    \EndFor
+  \end{algorithmic}
+\end{algorithm}
+
+Figure \ref{FigResults} shows a sample image where $\vec L =
+(4,4,-1)$, $W_Y = 10$, $W_{max} = 10$, $C = (0,12,0)$, $R = 6$.
+
+
+\begin{figure}[hb]
+  \label{FigResults}
+  \centering
+  \includegraphics[width=0.4\textwidth]{sphere_render.pdf}
+  \caption{Ray-Traced Render of a Sphere Illuminated from Top Left}
+\end{figure}
+
+\newpage
+
+\section{Questions}
+
+\begin{enumerate}
+
+  \item Make and test a serial version of Algorithm 1.  Take user input for the
+    number of rays and gridpoints; the other parameters can be hardcoded.
+    (Hint: Define structs and functions for the vectors and vector operations.
+    With these simple abstractions, the code can be written in about 100
+    lines.)
+
+  \item Use OpenMP to parallelize Algorithm 1.  Note that, while the
+    rays are independent, updating the window could result in write conflicts.
+    Therefore, some syncronization is necessary.   Implement two versions with:
+    \begin{enumerate}
+      \item Atomic additions on a single copy of the window
+      \item Threadprivate copies of the window, accumulated into a single
+        copy at the end of the simulation
+    \end{enumerate}
+
+  \item For both of your synchronization schemes, perform strong-scaling
+    analysis.  Compare the performance of the two schemes on a graph.  Was one
+    scheme faster than the other?  Why or why not?
+
+  \item Show a sample image produced by any of your ray-tracing implmenentations.
+
+\end{enumerate}
+
+\section{References}
+\begin{enumerate}
+
+  \item \label{ItemUNC} Rademacher, Paul.  \textit{Ray Tracing: Graphics for
+    the Masses.} \url{https://www.cs.unc.edu/~rademach/xroads-RT/RTarticle.html}
+
+  \item \label{ItemWiki} \textit{Ray tracing (graphics).}
+    \url{http://en.wikipedia.org/wiki/Ray_tracing_(graphics)}
+
+\end{enumerate}
+
+\end{document}

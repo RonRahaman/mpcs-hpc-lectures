@@ -16,9 +16,9 @@
 \usepackage{makecell}
 \graphicspath{{./img/}}
 
-\title{Async 4: Timing and Shared Memory}
+\title{Async 4: Timing and Shared Memory in a Dot Product Implementation}
 \subtitle{MPCS 51087: High-Performance Computing}
-\date{Spring 2020}
+\date{Winter 2021}
 \author{Ron Rahaman}
 \institute{The University of Chicago, Dept of Computer Science}
 
@@ -54,27 +54,33 @@
 
     \section{Timing GPU Code}
 
-    \begin{frame}{CPU Timers?}
-
+    \begin{frame}{Using host timers for GPU kernels?}
         \begin{itemize}
-            \item Timing GPUs form host code is unreliable because \textbf{many CUDA commands are asynchronous}
+            \item You cannot reliably time GPU kernels using CPU timers (\texttt{clock\_gettime}, \texttt{std::chrono}, etc.) because because many CUDA commands are asynchronous.
+            \item When the CPU calls an \textbf{asynchronous} GPU kernel or function, the CPU can continue to execute other tasks before the GPU is finished executing that funtion.
             \begin{itemize}
-                \item Asynchronous: When called from CPU, begins to execute on GPU, and \textbf{CPU can continue execution before the GPU execution is finished}.
-                \item All kernel launches are asynchronous
-                \item Normal memcopies are blocking
+                \item Kernel launches are asynchronous.
             \end{itemize}
-            \item Example:  Is the time measured between \texttt{start} and \texttt{kernel\_end} reliable?  What about \texttt{start} and \texttt{memcpy\_end}?
+            \item When the CPU calls a \textbf{blocking} GPU function, the CPU must wait until until the GPU function is finished.
+            \begin{itemize}
+                \item Regular memcopies (\texttt{cudaMemcpy}) are blocking.
+            \end{itemize}
         \end{itemize}
+    \end{frame}
 
+    \begin{frame}{Example: Which timings are reliable?}
+        \begin{itemize}
+            \item Is the time measured between \texttt{start} and \texttt{kernel\_end} reliable?
+            \item What about the time measured between \texttt{start} and \texttt{memcpy\_end}?
+        \end{itemize}
         \begin{block}{}
             \inputminted{cuda}{src/cpu-timer.cu}
         \end{block}
-
     \end{frame}
 
     \begin{frame}{GPU Timing with CUDA Events}
         \begin{itemize}
-            \item During execution on the GPU, CUDA \textbf{events} can be used to reliably time CUDA \textbf{streams}
+            \item During execution on the GPU, CUDA \textbf{events} can be used to reliably time CUDA \textbf{streams}.
             \item Events and streams have many complex usages, but basic usage for timing is very simple.
         \end{itemize}
     \end{frame}
@@ -83,16 +89,13 @@
         \begin{columns}
             \begin{column}{0.6\textwidth}
                 \begin{itemize}
-                    \item A CUDA \textbf{stream} is an ordered queue of commands that execute on the GPU
+                    \item A CUDA \textbf{stream} is an ordered queue of commands that execute on the GPU.
                     \begin{itemize}
-                        \item Always one stream (``default stream'', ``stream 0'', or ``NULL stream'')
-                        \item Programmer can create additional streams for asynchronous commands
-                        \item Commands on the default stream implicitly block other streams
+                        \item Always at least one stream executing on the GPU (``default stream'', ``stream 0'', or ``NULL stream'')
+                        \item Programmer can create additional streams for asynchronous commands.
+                        \item Commands on the default stream implicitly block other streams.
                     \end{itemize}
-                    \item A CUDA \textbf{event} is a timestamp recorded by the GPU
-                    \begin{itemize}
-                        \item An event is queued up on a particular stream
-                    \end{itemize}
+                    \item A CUDA \textbf{event} is a timestamp recorded by the GPU on a specified stream.
                     \item By placing events on the default stream, we can reliably time the GPU.
                 \end{itemize}
             \end{column}
@@ -152,19 +155,20 @@
             \column{0.5\textwidth}
             {\footnotesize
             \begin{itemize}
-                \item \textbf{Thread (yellow)}: Runs a single operation on one SP
-                \item \textbf{Warp (red)}:
+                \item \textbf{Thread (yellow)}
                 \begin{itemize}
-                    \item A warp contains a specific number of threads, which is fixed by the hardware
-                    \item A warp is assigned to an SM
-                    \item A warp's threads execute on a group of SPs
-                    \item The threads in a warp can execute in SIMD
+                    \item 1 thread assigned to 1 SP
                 \end{itemize}
-                \item \textbf{Block (blue)}:
+                \item \textbf{Warp (red)}
                 \begin{itemize}
-                    \item A block contains a specific number of threads (and hence warps)
-                    \item A block is assigned to an SM
-                    \item Multiple blocks can execute in parallel on one SM
+                    \item Contains multiple threads.  Number is hardware-specific.
+                    \item $\ge 1$ warps assigned to 1 SM
+                \end{itemize}
+                \item \textbf{Block (blue)}
+                \begin{itemize}
+                    \item Contains multiple threads. Number is set by programmer at kenrel launch.
+                    \item Contains multiple warps.  Number is implicitly determined by block dim and warp size.
+                    \item $\ge 1$ blocks assigned to 1 SM
                 \end{itemize}
             \end{itemize}
             }
@@ -176,16 +180,15 @@
         \end{columns}
     \end{frame}
 
-    \begin{frame}{What is Shared Memory}
+    \begin{frame}{What is shared memory?}
         \begin{itemize}
             \item A variable located in \textbf{shared memory} is ``block private.''
             \begin{itemize}
-                \item Each block has a different copy
-                \item All threads in the block have access to that copy
-                \item Hence, shared memory access should be synchronized within each block (but not
+                \item Each block has a different copy.
+                \item All threads in the block have access to that copy.
             \end{itemize}
-            \item Within each block, threads may need to be synchronized to avoid race conditions on shared memory writes
-            \item Shared memory physically resides on higher-bandwidth memory and can be managed by the user
+            \item Within each block, threads may need to be explicitly synchronized to avoid race conditions on shared memory writes.
+            \item Shared memory physically resides on higher-bandwidth memory and can be managed by the user.
         \end{itemize}
     \end{frame}
     
@@ -194,18 +197,22 @@
     \subsection{Algorithm}
 
     \begin{frame}{Extended Example: Dot Product}
-        A dot product is one example of a reduction
-        \begin{equation*}
-            \vec{a} \cdot \vec{b} = \sum_i = a_i b_i
-        \end{equation*}
-        We will explore how to use shared-memory buffers to optimize this reduction
+        \begin{itemize}
+            \item A dot product is one example of a reduction:
+            \begin{equation*}
+                \vec{a} \cdot \vec{b} = \sum_i = a_i b_i
+            \end{equation*}
+            \item We will shared-memory buffers to optimize this reduction.
+            \item Optimizations are applicable to other reductions, too.
+        \end{itemize}
     \end{frame}
 
     \begin{frame}{Dot Product Algorithm: Step 1}
         \begin{itemize}
-            \item Here, the dot product is executed by 3 blocks (blue, green, orange) with 4 threads/block
-            \item We have allocated a shared memory buffer for each block
-            \item Each thread $i$ stores the result $a_i b_i$ in shared memory
+            \item The grid dimension is 3 (i.e., 3 total blocks).
+            \item The block dimension is 4 (i.e., 4 threads/block).
+            \item The operands $a$ and $b$ are in global memory.  They are accessible by all the blocks, but we will organize the accesses so that portions of the arrays are accessed by specific blocks (blue, green and red)
+            \item Each block has a shared memory buffer that is private to the block.  Each will store a portion of the results $a_i \times b_i$ before we reduce them.
         \end{itemize}
         \begin{figure}
             \centering
@@ -215,8 +222,8 @@
 
     \begin{frame}{Dot Product Algorithm: Step 2}
         \begin{itemize}
-            \item Each block performs a reduction (sum) on its shared memory buffer
-            \item Each block puts its partial sum in global memory
+            \item Each block performs a reduction (sum) on its shared memory buffer.
+            \item Each block puts its partial sum in global memory.
         \end{itemize}
         \begin{figure}
             \centering
@@ -226,8 +233,9 @@
 
     \begin{frame}{Dot Product Algorithm: Step 3}
         \begin{itemize}
-            \item The partial sums are sent to the host
-            \item The host does the final reduction
+            \item The partial sums are sent to the host.
+            \item Then the host does the final reduction.
+            \item For a very large number of blocks, the reduction is more efficient on the host than the device.
         \end{itemize}
         \begin{figure}
             \centering
@@ -237,13 +245,17 @@
     
     \subsection{Implementation}
 
+    \begin{frame}{Completed Example}
+        See course repo:  \url{https://github.com/mpcs-hpc/mpcs-hpc-winter-2021/blob/main/week04/dot_static_shared.cu}
+    \end{frame}
+
     \begin{frame}{Part 1. Allocating Memory}
             \begin{itemize}
             {\footnotesize
                 \item \texttt{block\_dim} (the number of threads/block) is a compile-time constant
-                \item \texttt{n} is the size of the operands \texttt{a} and \texttt{b}
+                \item \texttt{n} is the length of the operands \texttt{a} and \texttt{b}
                 \item \texttt{grid\_dim} (the number of blocks) is \texttt{ceil(n / block\_dim)}
-                \item \texttt{partial\_c} and \texttt{d\_partial\_c} will contain the partial sums from every block.
+                \item \texttt{partial\_c} and \texttt{d\_partial\_c} will contain the partial sums from all blocks.
             }
             \end{itemize}
             \begin{block}{}
@@ -255,8 +267,8 @@
         \begin{itemize}
         {\footnotesize
         \item Each block gets a shared memory \texttt{cache} of size \texttt{block\_dim}
-        \item Each thread independently accumulates \texttt{cache[threadIdx.x] += a[i] * b[i]} for a subset of \texttt{i}
-        \item After this, we want all threads to see the result in \texttt{cache}.  Hence, we sync all the threads in the block with \texttt{\_\_syncthreads()}
+        \item Each thread independently accumulates \texttt{cache[threadIdx.x] += a[i] * b[i]} for its subsets of \texttt{a} and \texttt{b}
+        \item After this, we want all threads to see the final result their block's \texttt{cache}.  Hence, we sync all the threads in the block with \texttt{\_\_syncthreads()}
         }
         \end{itemize}
         \begin{block}{}
@@ -276,7 +288,7 @@
         \end{enumerate}
         \begin{figure}
             \centering
-            \includegraphics[width=0.5\textwidth]{img/04/parallel-reduc.png}
+            \includegraphics[width=0.5\textwidth]{img/04/parallel-reduc-annotated.png}
         \end{figure}
     \end{frame}
 
@@ -341,7 +353,7 @@
         \end{itemize}
     \end{frame}
 
-    \begin{frame}{Exercise 1:  Implementing Dynamic Shared Memory in Dot Product}
+    \begin{frame}{(Ungraded) Exercise: Implementing Dynamic Shared Memory in Dot Product}
         Start with source in repo, \texttt{src/lecture\_05/dot\_gpu.cu}, and add
         the following features:
         \begin{enumerate}
@@ -353,7 +365,18 @@
             \end{itemize}
             \item Use command-line args to set size of shared-memory cache
         \end{enumerate}
-        Solution in \texttt{src/lecture\_05/solutions/01\_dot.cu}
+        Solution in course repo: \url{https://github.com/mpcs-hpc/mpcs-hpc-winter-2021/blob/main/week04/solutions/dot_dynamic_shared.cu}
+    \end{frame}
+
+    \section{References}
+
+    \begin{frame}{References}
+        \begin{itemize}
+            \item Sanders and Kandrot.  \textit{CUDA by Example: An Introduction to General-Purpose GPU Programming}.
+            Chapter 5, ``Thread Cooperation''
+            \item NVIDIA Developer Blog.  ``Using Shared Memory in CUDA C/C++''  \url{https://developer.nvidia.com/blog/using-shared-memory-cuda-cc/}
+            \item CUDA Toolkit Documentation.  ``9.2.3: Shared Memory''  \url{https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html\#shared-memory}
+        \end{itemize}
     \end{frame}
 
 \end{document}
